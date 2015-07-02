@@ -72,7 +72,7 @@ war {
 
 jettyRun.contextPath = '/'
 jettyRun.httpPort = 8099
-jettyRun.daemon = true
+jettyRun.daemon = false
 jettyStop.stopPort = 8091
 jettyStop.stopKey = 'stopKey'
 
