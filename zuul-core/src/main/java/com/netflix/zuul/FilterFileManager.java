@@ -125,6 +125,7 @@ public class FilterFileManager {
         File  directory = new File(sPath);
         if (!directory.isDirectory()) {
             URL resource = FilterFileManager.class.getClassLoader().getResource(sPath);
+            LOG.error("Resource: " + resource + " sPath: " + sPath);
             try {
                 directory = new File(resource.toURI());
             } catch (Exception e) {

@@ -132,7 +132,7 @@ public class StartServer extends GuiceServletContextListener {
         initCassandra();
         initNIWS();
 
-        ApplicationInfoManager.getInstance().setInstanceStatus(InstanceInfo.InstanceStatus.UP);
+        //ApplicationInfoManager.getInstance().setInstanceStatus(InstanceInfo.InstanceStatus.UP);
     }
 
     private void initPlugins() {
