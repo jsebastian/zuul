@@ -1,7 +1,7 @@
 package com.netflix.zuul.util;
 
 import com.netflix.client.http.HttpResponse;
-import com.netflix.zuul.context.HttpRequestMessage;
+import com.netflix.zuul.message.http.HttpRequestMessage;
 import org.junit.Assert;
 import org.junit.Test;
 import org.junit.runner.RunWith;
@@ -31,8 +31,8 @@ public class ProxyUtils
     {
         switch (headerName.toLowerCase()) {
             case "connection":
+            case "keep-alive":
             case "content-length":
-            case "server":
             case "transfer-encoding":
                 return false;
             default:

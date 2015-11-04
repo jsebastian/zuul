@@ -15,8 +15,17 @@
  */
 package com.netflix.zuul.context;
 
+import com.netflix.config.DynamicBooleanProperty;
+import com.netflix.config.DynamicPropertyFactory;
 import com.netflix.zuul.bytebuf.ByteBufUtils;
+import com.netflix.zuul.exception.ZuulException;
+import com.netflix.zuul.message.Header;
+import com.netflix.zuul.message.HeaderName;
+import com.netflix.zuul.message.Headers;
+import com.netflix.zuul.message.ZuulMessage;
+import com.netflix.zuul.message.http.*;
 import io.netty.buffer.ByteBuf;
+import io.netty.buffer.Unpooled;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import rx.Observable;
@@ -27,8 +36,8 @@ import javax.servlet.http.HttpServletResponse;
 import java.io.IOException;
 import java.io.InputStream;
 import java.net.SocketTimeoutException;
+import java.security.cert.X509Certificate;
 import java.util.Enumeration;
-import java.util.Map;
 
 /**
  * User: michaels@netflix.com
@@ -38,9 +47,13 @@ import java.util.Map;
 public class ServletSessionContextFactory implements SessionContextFactory<HttpServletRequest, HttpServletResponse>
 {
     private static final Logger LOG = LoggerFactory.getLogger(ServletSessionContextFactory.class);
+    private static final String JAVAX_SERVLET_REQUEST_X509_CERTIFICATE = "javax.servlet.request.X509Certificate";
+
+    private static final DynamicBooleanProperty SHOULD_ERROR_ON_SOCKET_READ_TIMEOUT = DynamicPropertyFactory.getInstance().getBooleanProperty(
+            "zuul.ServletSessionContextFactory.errorOnSocketReadTimeout", false);
 
     @Override
-    public ZuulMessage create(SessionContext context, HttpServletRequest servletRequest)
+    public ZuulMessage create(SessionContext context, HttpServletRequest servletRequest, HttpServletResponse response)
     {
         // Parse the headers.
         Headers reqHeaders = new Headers();
@@ -48,9 +61,10 @@ public class ServletSessionContextFactory implements SessionContextFactory<HttpS
         while (headerNames.hasMoreElements()) {
             String name = (String) headerNames.nextElement();
             Enumeration values = servletRequest.getHeaders(name);
+            HeaderName hn = HttpHeaderNames.get(name);
             while (values.hasMoreElements()) {
                 String value = (String) values.nextElement();
-                reqHeaders.add(name, value);
+                reqHeaders.add(hn, value);
             }
         }
 
@@ -61,22 +75,17 @@ public class ServletSessionContextFactory implements SessionContextFactory<HttpS
         copyServletRequestAttributes(context, servletRequest);
 
         // Build the request object.
-        HttpRequestMessage request = new HttpRequestMessage(context, servletRequest.getProtocol(), servletRequest.getMethod(),
+        HttpRequestMessage request = new HttpRequestMessageImpl(context, servletRequest.getProtocol(), servletRequest.getMethod(),
                 servletRequest.getRequestURI(), queryParams, reqHeaders, servletRequest.getRemoteAddr(),
                 servletRequest.getScheme(), servletRequest.getServerPort(), servletRequest.getServerName());
 
         // Store this original request info for future reference (ie. for metrics and access logging purposes).
-        request.storeOriginalRequestInfo();
+        request.storeInboundRequest();
 
         // Get the inputstream of body.
-        InputStream bodyInput = null;
+        InputStream bodyInput;
         try {
             bodyInput = servletRequest.getInputStream();
-        }
-        catch (SocketTimeoutException e) {
-            // This can happen if the request body is smaller than the size specified in the
-            // Content-Length header, and using tomcat APR connector.
-            LOG.error("SocketTimeoutException reading request body from inputstream. error=" + String.valueOf(e.getMessage()));
         }
         catch (IOException e) {
             String errorMsg = "Error reading ServletInputStream.";
@@ -87,6 +96,32 @@ public class ServletSessionContextFactory implements SessionContextFactory<HttpS
         // Wrap the ServletInputStream(body) in an Observable.
         if (bodyInput != null) {
             Observable<ByteBuf> bodyObs = ByteBufUtils.fromInputStream(bodyInput);
+            bodyObs = bodyObs.onErrorReturn((e) -> {
+                if (SocketTimeoutException.class.isAssignableFrom(e.getClass())) {
+
+                    // This can happen if the request body is smaller than the size specified in the
+                    // Content-Length header, and using tomcat APR connector.
+                    LOG.error("SocketTimeoutException reading request body from inputstream. error="
+                            + String.valueOf(e.getMessage()) + ", request-info: " + request.getInfoForLogging());
+
+                    // Store the exception.
+                    ZuulException ze = new ZuulException(e.getMessage(), e, "TIMEOUT_READING_REQ_BODY");
+                    ze.setStatusCode(400);
+                    request.getContext().setError(ze);
+
+                    if (SHOULD_ERROR_ON_SOCKET_READ_TIMEOUT.get()) {
+                        // Flag to respond to client with an error. As we don't want to attempt proxying if we failed to read the body.
+                        request.getContext().setShouldSendErrorResponse(true);
+                    }
+                }
+                else {
+                    LOG.error("Error reading request body from inputstream. error="
+                            + String.valueOf(e.getMessage()) + ", request-info: " + request.getInfoForLogging());
+                }
+
+                // Return an empty bytebuf.
+                return Unpooled.EMPTY_BUFFER;
+            });
             request.setBodyStream(bodyObs);
         }
 
@@ -103,6 +138,16 @@ public class ServletSessionContextFactory implements SessionContextFactory<HttpS
                 context.put(attrName.substring(zuulAttrPrefix.length()), servletRequest.getAttribute(attrName));
             }
         }
+
+        copyServletRequestX509Attributes(context, servletRequest);
+    }
+
+    private void copyServletRequestX509Attributes(SessionContext context, HttpServletRequest servletRequest)
+    {
+        // Copy X509 request attribute into the context.
+        X509Certificate[] certs = (X509Certificate[]) servletRequest.getAttribute(JAVAX_SERVLET_REQUEST_X509_CERTIFICATE);
+        if (certs != null)
+            context.set(JAVAX_SERVLET_REQUEST_X509_CERTIFICATE, certs);
     }
 
     @Override
@@ -114,8 +159,8 @@ public class ServletSessionContextFactory implements SessionContextFactory<HttpS
         servletResponse.setStatus(response.getStatus());
 
         // Headers.
-        for (Map.Entry<String, String> header : response.getHeaders().entries()) {
-            servletResponse.setHeader(header.getKey(), header.getValue());
+        for (Header header : response.getHeaders().entries()) {
+            servletResponse.addHeader(header.getKey(), header.getValue());
         }
 
         // Body.
@@ -147,11 +192,10 @@ public class ServletSessionContextFactory implements SessionContextFactory<HttpS
                         }
                     })
                     .doOnError(t -> {
-                        LOG.error("Error writing repsonse to ServletOutputStream.", t);
+                        LOG.error("Error writing response to ServletOutputStream.", t);
                     })
                     .map(bb ->  msg);
 
-            writeBody.subscribe();
             return writeBody;
 
         }

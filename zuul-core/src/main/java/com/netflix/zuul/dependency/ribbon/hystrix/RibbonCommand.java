@@ -23,8 +23,9 @@ import com.netflix.hystrix.HystrixCommandGroupKey;
 import com.netflix.hystrix.HystrixCommandProperties;
 import com.netflix.niws.client.http.RestClient;
 import com.netflix.zuul.constants.ZuulConstants;
-import com.netflix.zuul.context.Headers;
-import com.netflix.zuul.context.HttpQueryParams;
+import com.netflix.zuul.message.Header;
+import com.netflix.zuul.message.Headers;
+import com.netflix.zuul.message.http.HttpQueryParams;
 
 import java.io.InputStream;
 import java.net.URI;
@@ -99,7 +100,7 @@ public class RibbonCommand extends HystrixCommand<HttpResponse> {
                 uri(uri).
                 entity(requestEntity);
 
-        for (Map.Entry<String, String> entry : headers.entries()) {
+        for (Header entry : headers.entries()) {
             builder.header(entry.getKey(), entry.getValue());
         }
 

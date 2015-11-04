@@ -22,11 +22,18 @@ import com.netflix.client.http.HttpRequest;
 import com.netflix.client.http.HttpResponse;
 import com.netflix.config.DynamicIntProperty;
 import com.netflix.config.DynamicPropertyFactory;
+import com.netflix.loadbalancer.Server;
 import com.netflix.niws.client.http.RestClient;
 import com.netflix.zuul.bytebuf.ByteBufUtils;
 import com.netflix.zuul.constants.ZuulConstants;
 import com.netflix.zuul.context.*;
 import com.netflix.zuul.exception.ZuulException;
+import com.netflix.zuul.message.Header;
+import com.netflix.zuul.message.Headers;
+import com.netflix.zuul.message.http.HttpQueryParams;
+import com.netflix.zuul.message.http.HttpRequestMessage;
+import com.netflix.zuul.message.http.HttpResponseMessage;
+import com.netflix.zuul.message.http.HttpResponseMessageImpl;
 import com.netflix.zuul.origins.Origin;
 import com.netflix.zuul.stats.Timing;
 import com.netflix.zuul.util.ProxyUtils;
@@ -45,6 +52,7 @@ import rx.Observable;
 import java.io.ByteArrayInputStream;
 import java.io.InputStream;
 import java.net.URI;
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -60,10 +68,12 @@ public class RibbonOrigin implements Origin
             ZuulConstants.ZUUL_REQUEST_BODY_MAX_SIZE, 25 * 1000 * 1024);
 
     private final String name;
+    private final RestClient client;
 
     public RibbonOrigin(String name)
     {
         this.name = name;
+        this.client = (RestClient) ClientFactory.getNamedClient(name);
     }
 
     @Override
@@ -72,12 +82,20 @@ public class RibbonOrigin implements Origin
         return name;
     }
 
+    @Override
+    public boolean isAvailable() {
+        if(client == null || client.getLoadBalancer() == null) {
+            return false;
+        }
+        List<Server> serverList = client.getLoadBalancer().getServerList(true);
+        return serverList != null && serverList.size() > 0;
+    }
+
 
     @Override
     public Observable<HttpResponseMessage> request(HttpRequestMessage requestMsg)
     {
         SessionContext context = requestMsg.getContext();
-        RestClient client = (RestClient) ClientFactory.getNamedClient(name);
         if (client == null) {
             throw proxyError(requestMsg, new IllegalArgumentException("No RestClient found for name! name=" + String.valueOf(name)), null);
         }
@@ -93,7 +111,7 @@ public class RibbonOrigin implements Origin
                 uri(uri);
 
         // Request headers.
-        for (Map.Entry<String, String> entry : headers.entries()) {
+        for (Header entry : headers.entries()) {
             if (ProxyUtils.isValidRequestHeader(entry.getKey())) {
                 builder.header(entry.getKey(), entry.getValue());
             }
@@ -136,6 +154,10 @@ public class RibbonOrigin implements Origin
             HttpResponse ribbonResp;
             try {
                 ribbonResp = client.executeWithLoadBalancer(httpClientRequest);
+
+                // Store the ribbon response on context, so that code in a Observable.finallyDo() can get access
+                // to it to release the resources.
+                requestMsg.getContext().set("_ribbonResp", ribbonResp);
             }
             catch (ClientException e) {
                 throw proxyError(requestMsg, e, e.getErrorType().toString());
@@ -175,7 +197,7 @@ public class RibbonOrigin implements Origin
     protected HttpResponseMessage createHttpResponseMessage(HttpResponse ribbonResp, HttpRequestMessage request)
     {
         // Convert to a zuul response object.
-        HttpResponseMessage respMsg = new HttpResponseMessage(request.getContext(), request, 500);
+        HttpResponseMessage respMsg = new HttpResponseMessageImpl(request.getContext(), request, 500);
         respMsg.setStatus(ribbonResp.getStatus());
         for (Map.Entry<String, String> header : ribbonResp.getHttpHeaders().getAllHeaders()) {
             if (ProxyUtils.isValidResponseHeader(header.getKey())) {
@@ -184,11 +206,13 @@ public class RibbonOrigin implements Origin
         }
 
         // Store this original response info for future reference (ie. for metrics and access logging purposes).
-        respMsg.storeOriginalResponseInfo();
+        respMsg.storeInboundResponse();
 
         // Body.
-        Observable<ByteBuf> responseBodyObs = ByteBufUtils.fromInputStream(ribbonResp.getInputStream());
-        respMsg.setBodyStream(responseBodyObs);
+        if (ribbonResp.hasEntity()) {
+            Observable<ByteBuf> responseBodyObs = ByteBufUtils.fromInputStream(ribbonResp.getInputStream());
+            respMsg.setBodyStream(responseBodyObs);
+        }
 
         return respMsg;
     }

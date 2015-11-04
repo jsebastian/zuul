@@ -15,7 +15,7 @@
  */
 package com.netflix.zuul;
 
-import com.netflix.zuul.context.ZuulMessage;
+import com.netflix.zuul.message.ZuulMessage;
 import com.netflix.zuul.filters.BaseFilter;
 import com.netflix.zuul.filters.BaseSyncFilter;
 import com.netflix.zuul.filters.FilterRegistry;
@@ -163,7 +163,7 @@ public class FilterLoader
         return false;
     }
 
-    private void putFilter(String sName, ZuulFilter filter, long lastModified)
+    void putFilter(String sName, ZuulFilter filter, long lastModified)
     {
         List<ZuulFilter> list = hashFiltersByType.get(filter.filterType());
         if (list != null) {

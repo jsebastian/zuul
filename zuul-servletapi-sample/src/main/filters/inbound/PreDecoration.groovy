@@ -15,11 +15,12 @@
  */
 package inbound
 
-import com.netflix.zuul.context.Headers
-import com.netflix.zuul.context.HttpRequestMessage
-import com.netflix.zuul.context.HttpResponseMessage
-import com.netflix.zuul.context.SessionContext
+import com.netflix.zuul.context.*
 import com.netflix.zuul.filters.http.HttpInboundSyncFilter
+import com.netflix.zuul.message.Headers
+import com.netflix.zuul.message.http.HttpRequestMessage
+import com.netflix.zuul.message.http.HttpResponseMessage
+import com.netflix.zuul.message.http.HttpResponseMessageImpl
 import org.junit.Assert
 import org.junit.Before
 import org.junit.Test
@@ -87,7 +88,7 @@ public class PreDecoration extends HttpInboundSyncFilter
 
             ctx = new SessionContext()
             Mockito.when(request.getContext()).thenReturn(ctx)
-            response = new HttpResponseMessage(ctx, request, 99)
+            response = new HttpResponseMessageImpl(ctx, request, 99)
             reqHeaders = new Headers()
             Mockito.when(request.getHeaders()).thenReturn(reqHeaders)
         }

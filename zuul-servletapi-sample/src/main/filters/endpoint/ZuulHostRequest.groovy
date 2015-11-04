@@ -22,6 +22,11 @@ import com.netflix.zuul.constants.ZuulConstants
 import com.netflix.zuul.context.*
 import com.netflix.zuul.dependency.httpclient.hystrix.HostCommand
 import com.netflix.zuul.filters.http.HttpSyncEndpoint
+import com.netflix.zuul.message.Headers
+import com.netflix.zuul.message.http.HttpQueryParams
+import com.netflix.zuul.message.http.HttpRequestMessage
+import com.netflix.zuul.message.http.HttpResponseMessage
+import com.netflix.zuul.message.http.HttpResponseMessageImpl
 import com.netflix.zuul.util.HttpUtils
 import io.netty.buffer.ByteBuf
 import io.netty.buffer.ByteBufInputStream
@@ -190,19 +195,19 @@ class ZuulHostRequest extends HttpSyncEndpoint
         if (Debug.debugRequest(context)) {
 
             request.getHeaders().entries().each {
-                Debug.addRequestDebug(context, "ZUUL:: > ${it.key}  ${it.value}")
+                Debug.addRequestDebug(context, "REQUEST_INBOUND:: > ${it.key}  ${it.value}")
             }
             String query = ""
             request.getQueryParams().entries().each {
                 query += it.key + "=" + it.value + "&"
             }
 
-            Debug.addRequestDebug(context, "ZUUL:: > ${request.getMethod()}  ${request.getPath()}?${query} ${request.getProtocol()}")
+            Debug.addRequestDebug(context, "REQUEST_INBOUND:: > ${request.getMethod()}  ${request.getPath()}?${query} ${request.getProtocol()}")
 
             if (request.getBody() != null) {
                 if (!Debug.debugRequestHeadersOnly()) {
                     String entity = new ByteArrayInputStream(request.getBody()).getText()
-                    Debug.addRequestDebug(context, "ZUUL:: > ${entity}")
+                    Debug.addRequestDebug(context, "REQUEST_INBOUND:: > ${entity}")
                 }
             }
         }
@@ -213,8 +218,7 @@ class ZuulHostRequest extends HttpSyncEndpoint
         org.apache.http.HttpHost httpHost = getHttpHost(routeHost)
         URI uri
         if (params != null && params.entries().size() > 0) {
-            String queryString = params.entries().each{ URLEncoder.encode(it, "UTF-8") }.join("&")
-            uri = new URI(null, null, path, queryString, null)
+            uri = URI.create(path + "?" + params.toEncodedString())
         } else {
             uri = URI.create(path)
         }
@@ -293,7 +297,7 @@ class ZuulHostRequest extends HttpSyncEndpoint
         if (Debug.debugRequest(context)) {
 
             resp.getHeaders().entries().each { header ->
-                Debug.addRequestDebug(context, "ORIGIN_RESPONSE:: < ${header.getKey()}, ${header.getValue()}")
+                Debug.addRequestDebug(context, "RESPONSE_INBOUND:: < ${header.getKey()}, ${header.getValue()}")
             }
 
             if (resp.getBody()) {
@@ -301,7 +305,7 @@ class ZuulHostRequest extends HttpSyncEndpoint
                 if (HttpUtils.isGzipped(resp.getHeaders()))
                     inStream = new GZIPInputStream(inStream);
                 String responseEntity = inStream.getText()
-                Debug.addRequestDebug(context, "ORIGIN_RESPONSE:: < ${responseEntity}")
+                Debug.addRequestDebug(context, "RESPONSE_INBOUND:: < ${responseEntity}")
             }
         }
     }
@@ -309,7 +313,7 @@ class ZuulHostRequest extends HttpSyncEndpoint
     protected HttpResponseMessage createHttpResponseMessage(HttpResponse ribbonResp, HttpRequestMessage request)
     {
         // Convert to a zuul response object.
-        HttpResponseMessage respMsg = new HttpResponseMessage(request.getContext(), request, 500);
+        HttpResponseMessage respMsg = new HttpResponseMessageImpl(request.getContext(), request, 500);
         respMsg.setStatus(ribbonResp.getStatusLine().getStatusCode());
 
         // Headers.
@@ -369,7 +373,7 @@ class ZuulHostRequest extends HttpSyncEndpoint
         {
             ctx = new SessionContext()
             Mockito.when(request.getContext()).thenReturn(ctx)
-            response = new HttpResponseMessage(ctx, request, 200)
+            response = new HttpResponseMessageImpl(ctx, request, 200)
         }
 
         @Test

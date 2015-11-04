@@ -15,7 +15,7 @@
  */
 package com.netflix.zuul.filters;
 
-import com.netflix.zuul.context.ZuulMessage;
+import com.netflix.zuul.message.ZuulMessage;
 
 /**
  * User: michaels@netflix.com
@@ -29,5 +29,5 @@ public interface ShouldFilter<T extends ZuulMessage>
      *
      * @return true if the apply() method should be invoked. false will not invoke the apply() method
      */
-    public boolean shouldFilter(T msg);
+    boolean shouldFilter(T msg);
 }

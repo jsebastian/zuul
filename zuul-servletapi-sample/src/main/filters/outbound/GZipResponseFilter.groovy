@@ -15,18 +15,19 @@
  */
 package outbound
 
-import com.netflix.zuul.context.Headers
-import com.netflix.zuul.context.HttpRequestMessage
-import com.netflix.zuul.context.HttpResponseMessage
-import com.netflix.zuul.context.SessionContext
+import com.netflix.zuul.context.*
 import com.netflix.zuul.filters.http.HttpOutboundSyncFilter
+import com.netflix.zuul.message.Headers
+import com.netflix.zuul.message.http.HttpRequestInfo
+import com.netflix.zuul.message.http.HttpRequestMessage
+import com.netflix.zuul.message.http.HttpResponseMessage
+import com.netflix.zuul.message.http.HttpResponseMessageImpl
 import com.netflix.zuul.util.HttpUtils
 import org.apache.commons.io.IOUtils
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.mockito.Mock
-import org.mockito.Mockito
 import org.mockito.runners.MockitoJUnitRunner
 import org.slf4j.Logger
 import org.slf4j.LoggerFactory
@@ -36,6 +37,7 @@ import java.util.zip.GZIPOutputStream
 
 import static junit.framework.Assert.assertEquals
 import static junit.framework.Assert.assertNull
+import static org.mockito.Mockito.when
 
 class GZipResponseFilter extends HttpOutboundSyncFilter
 {
@@ -54,7 +56,7 @@ class GZipResponseFilter extends HttpOutboundSyncFilter
     @Override
     HttpResponseMessage apply(HttpResponseMessage response)
     {
-        HttpRequestMessage request = response.getRequest()
+        HttpRequestInfo request = response.getInboundRequest()
 
         byte[] body = response.bufferBody().toBlocking().first()
 
@@ -71,6 +73,7 @@ class GZipResponseFilter extends HttpOutboundSyncFilter
                 byte[] unGzippedBody = IOUtils.toByteArray(new GZIPInputStream(new ByteArrayInputStream(body)))
                 response.setBody(unGzippedBody)
                 response.getHeaders().remove("Content-Encoding")
+                response.getHeaders().set("Content-Length", Integer.toString(unGzippedBody.length))
 
             } catch (java.util.zip.ZipException e) {
                 LOG.error("Gzip expected but not received assuming unencoded response. So sending body as-is.")
@@ -82,6 +85,7 @@ class GZipResponseFilter extends HttpOutboundSyncFilter
                 byte[] gzippedBody = gzip(body)
                 response.setBody(gzippedBody)
                 response.getHeaders().set("Content-Encoding", "gzip")
+                response.getHeaders().set("Content-Length", Integer.toString(gzippedBody.length))
 
             } catch (java.util.zip.ZipException e) {
                 LOG.error("Error gzipping response body. So just sending as-is.")
@@ -116,11 +120,13 @@ class GZipResponseFilter extends HttpOutboundSyncFilter
         public void setup() {
             filter = new GZipResponseFilter()
             ctx = new SessionContext()
-            Mockito.when(request.getContext()).thenReturn(ctx)
-            response = new HttpResponseMessage(ctx, request, 99)
 
+            when(request.getContext()).thenReturn(ctx)
+            when(request.getInboundRequest()).thenReturn(request)
             reqHeaders = new Headers()
-            Mockito.when(request.getHeaders()).thenReturn(reqHeaders)
+            when(request.getHeaders()).thenReturn(reqHeaders)
+
+            response = new HttpResponseMessageImpl(ctx, request, 99)
         }
 
         @Test

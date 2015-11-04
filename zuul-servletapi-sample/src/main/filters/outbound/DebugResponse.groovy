@@ -19,16 +19,18 @@ import com.netflix.config.DynamicBooleanProperty
 import com.netflix.config.DynamicPropertyFactory
 import com.netflix.zuul.constants.ZuulConstants
 import com.netflix.zuul.context.Debug
-import com.netflix.zuul.context.HttpRequestMessage
-import com.netflix.zuul.context.HttpResponseMessage
 import com.netflix.zuul.context.SessionContext
-import com.netflix.zuul.filters.http.HttpOutboundSyncFilter
+import com.netflix.zuul.filters.http.HttpOutboundFilter
+import com.netflix.zuul.message.http.HttpRequestMessage
+import com.netflix.zuul.message.http.HttpResponseMessage
+import com.netflix.zuul.message.http.HttpResponseMessageImpl
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.mockito.Mock
 import org.mockito.Mockito
 import org.mockito.runners.MockitoJUnitRunner
+import rx.Observable
 
 import static junit.framework.Assert.assertEquals
 
@@ -37,7 +39,7 @@ import static junit.framework.Assert.assertEquals
  * Date: 5/1/15
  * Time: 5:35 PM
  */
-class DebugResponse extends HttpOutboundSyncFilter
+class DebugResponse extends HttpOutboundFilter
 {
     static DynamicBooleanProperty INCLUDE_DEBUG_HEADER =
             DynamicPropertyFactory.getInstance().getBooleanProperty(ZuulConstants.ZUUL_INCLUDE_DEBUG_HEADER, false);
@@ -54,7 +56,7 @@ class DebugResponse extends HttpOutboundSyncFilter
     }
 
     @Override
-    HttpResponseMessage apply(HttpResponseMessage response)
+    Observable<HttpResponseMessage> applyAsync(HttpResponseMessage response)
     {
         if (INCLUDE_DEBUG_HEADER.get()) {
             String debugHeader = ""
@@ -65,13 +67,8 @@ class DebugResponse extends HttpOutboundSyncFilter
             response.getHeaders().set("X-Zuul-Debug-Header", debugHeader)
         }
 
-        if (Debug.debugRequest(response.getContext())) {
-            response.getHeaders().entries()?.each { Map.Entry<String, String> it ->
-                Debug.addRequestDebug(response.getContext(), "OUTBOUND: <  " + it.key + ":" + it.value)
-            }
-        }
-
-        return response
+        return Debug.writeDebugResponse(response.getContext(), response, false)
+                .map({bool -> response})
     }
 
     @RunWith(MockitoJUnitRunner.class)
@@ -86,7 +83,7 @@ class DebugResponse extends HttpOutboundSyncFilter
         public void setup() {
             context = new SessionContext()
             Mockito.when(request.getContext()).thenReturn(context)
-            response = new HttpResponseMessage(context, request, 99)
+            response = new HttpResponseMessageImpl(context, request, 99)
         }
 
         @Test
@@ -96,7 +93,7 @@ class DebugResponse extends HttpOutboundSyncFilter
             filter.INCLUDE_DEBUG_HEADER = Mockito.mock(DynamicBooleanProperty.class)
             Mockito.when(filter.INCLUDE_DEBUG_HEADER.get()).thenReturn(true)
 
-            filter.apply(response)
+            filter.applyAsync(response).toBlocking().single()
 
             assertEquals("", response.getHeaders().getFirst("X-Zuul-Debug-Header"))
         }

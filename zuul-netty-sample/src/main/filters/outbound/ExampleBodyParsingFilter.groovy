@@ -16,7 +16,7 @@
 package outbound
 
 import com.netflix.zuul.bytebuf.ByteBufUtils
-import com.netflix.zuul.context.HttpResponseMessage
+import com.netflix.zuul.message.http.HttpResponseMessage
 import com.netflix.zuul.filters.http.HttpOutboundFilter
 import org.slf4j.Logger
 import org.slf4j.LoggerFactory
@@ -58,7 +58,7 @@ class ExampleBodyParsingFilter extends HttpOutboundFilter
 
     @Override
     boolean shouldFilter(HttpResponseMessage response) {
-        return response.getRequest().getQueryParams().get("parse")
+        return response.getInboundRequest().getQueryParams().get("parse")
     }
 
     @Override

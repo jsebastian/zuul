@@ -15,8 +15,8 @@
  */
 package outbound
 
-import com.netflix.zuul.context.HttpResponseMessage
-import com.netflix.zuul.context.ZuulMessage
+import com.netflix.zuul.message.http.HttpResponseMessage
+import com.netflix.zuul.message.ZuulMessage
 import com.netflix.zuul.filters.MessageBodyBufferFilter
 
 /**
@@ -29,7 +29,7 @@ class BufferingOutbound extends MessageBodyBufferFilter
     @Override
     boolean shouldFilter(ZuulMessage msg) {
         HttpResponseMessage response = msg
-        return response.getRequest().getQueryParams().getFirst("buffer")
+        return response.getInboundRequest().getQueryParams().getFirst("buffer")
     }
 
     @Override

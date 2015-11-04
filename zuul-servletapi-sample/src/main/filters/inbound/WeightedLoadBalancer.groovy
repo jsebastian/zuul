@@ -19,8 +19,9 @@ import com.netflix.config.DynamicIntProperty
 import com.netflix.config.DynamicPropertyFactory
 import com.netflix.config.DynamicStringProperty
 import com.netflix.zuul.constants.ZuulConstants
-import com.netflix.zuul.context.HttpRequestMessage
-import com.netflix.zuul.context.HttpResponseMessage
+import com.netflix.zuul.message.http.HttpRequestMessage
+import com.netflix.zuul.message.http.HttpResponseMessage
+import com.netflix.zuul.message.http.HttpResponseMessageImpl
 import com.netflix.zuul.context.SessionContext
 import com.netflix.zuul.dependency.ribbon.RibbonConfig
 import com.netflix.zuul.filters.http.HttpInboundSyncFilter
@@ -107,7 +108,7 @@ class WeightedLoadBalancer extends HttpInboundSyncFilter
             filter = Mockito.spy(new WeightedLoadBalancer())
             ctx = new SessionContext()
             Mockito.when(request.getContext()).thenReturn(ctx)
-            response = new HttpResponseMessage(ctx, request, 99)
+            response = new HttpResponseMessageImpl(ctx, request, 99)
             RibbonConfig.setApplicationName("zuul")
         }
 

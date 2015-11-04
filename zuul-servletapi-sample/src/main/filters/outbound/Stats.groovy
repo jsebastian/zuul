@@ -15,19 +15,21 @@
  */
 package outbound
 
-import com.netflix.zuul.context.Headers
-import com.netflix.zuul.context.HttpRequestMessage
-import com.netflix.zuul.context.HttpResponseMessage
-import com.netflix.zuul.context.SessionContext
+import com.netflix.zuul.context.*
 import com.netflix.zuul.filters.http.HttpOutboundSyncFilter
+import com.netflix.zuul.message.Headers
+import com.netflix.zuul.message.http.HttpRequestMessage
+import com.netflix.zuul.message.http.HttpResponseMessage
+import com.netflix.zuul.message.http.HttpResponseMessageImpl
 import com.netflix.zuul.stats.StatsManager
 import org.junit.Assert
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.mockito.Mock
-import org.mockito.Mockito
 import org.mockito.runners.MockitoJUnitRunner
+
+import static org.mockito.Mockito.when
 
 /**
  * @author Mikey Cohen
@@ -52,23 +54,27 @@ class Stats extends HttpOutboundSyncFilter
         SessionContext ctx = response.getContext()
         int status = response.getStatus()
         StatsManager sm = StatsManager.manager
-        sm.collectRequestStats(response.getRequest());
+        sm.collectRequestStats(response.getInboundRequest());
         sm.collectRouteStats(ctx.route, status);
         dumpRoutingDebug(ctx)
         dumpRequestDebug(ctx)
     }
 
-    public void dumpRequestDebug(SessionContext ctx) {
-        List<String> rd = (List<String>) ctx.get("requestDebug");
+    public void dumpRequestDebug(SessionContext context)
+    {
+        String uuid = context.getUUID()
+        List<String> rd = Debug.getRequestDebug(context)
         rd?.each {
-            println("REQUEST_DEBUG::${it}");
+            println("${uuid} ${it}");
         }
     }
 
-    public void dumpRoutingDebug(SessionContext ctx) {
-        List<String> rd = (List<String>) ctx.get("routingDebug");
+    public void dumpRoutingDebug(SessionContext ctx)
+    {
+        String uuid = ctx.getUUID()
+        List<String> rd = Debug.getRoutingDebug(ctx);
         rd?.each {
-            println("ZUUL_DEBUG::${it}");
+            println("${uuid} ${it}");
         }
     }
 
@@ -88,11 +94,14 @@ class Stats extends HttpOutboundSyncFilter
         public void setup() {
             filter = new Stats()
             ctx = new SessionContext()
-            Mockito.when(request.getContext()).thenReturn(ctx)
-            response = new HttpResponseMessage(ctx, request, 99)
+            
+            when(request.getContext()).thenReturn(ctx)
+            when(request.getInboundRequest()).thenReturn(request)
 
             reqHeaders = new Headers()
-            Mockito.when(request.getHeaders()).thenReturn(reqHeaders)
+            when(request.getHeaders()).thenReturn(reqHeaders)
+
+            response = new HttpResponseMessageImpl(ctx, request, 99)
         }
 
         @Test

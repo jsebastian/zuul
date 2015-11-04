@@ -17,6 +17,11 @@ package outbound
 
 import com.netflix.zuul.context.*
 import com.netflix.zuul.filters.http.HttpOutboundSyncFilter
+import com.netflix.zuul.message.Headers
+import com.netflix.zuul.message.http.HttpRequestInfo
+import com.netflix.zuul.message.http.HttpRequestMessage
+import com.netflix.zuul.message.http.HttpResponseMessage
+import com.netflix.zuul.message.http.HttpResponseMessageImpl
 import com.netflix.zuul.stats.ErrorStatsManager
 import org.junit.Assert
 import org.junit.Before
@@ -27,6 +32,7 @@ import org.mockito.Mockito
 import org.mockito.runners.MockitoJUnitRunner
 
 import static com.netflix.zuul.constants.ZuulHeaders.*
+import static org.mockito.Mockito.when
 
 class PostDecoration extends HttpOutboundSyncFilter
 {
@@ -45,7 +51,7 @@ class PostDecoration extends HttpOutboundSyncFilter
 
     void addStandardResponseHeaders(HttpResponseMessage response) {
 
-        String originatingURL = getOriginatingURL(response.getRequest())
+        String originatingURL = getOriginatingURL(response.getInboundRequest())
         SessionContext context = response.getContext()
 
         Headers headers = response.getHeaders()
@@ -61,7 +67,7 @@ class PostDecoration extends HttpOutboundSyncFilter
         }
     }
 
-    String getOriginatingURL(HttpRequestMessage request)
+    String getOriginatingURL(HttpRequestInfo request)
     {
         String protocol = request.getHeaders().getFirst(X_FORWARDED_PROTO)
         if (protocol == null) protocol = "http"
@@ -91,11 +97,14 @@ class PostDecoration extends HttpOutboundSyncFilter
         public void setup() {
             filter = Mockito.spy(new PostDecoration())
             ctx = new SessionContext()
-            Mockito.when(request.getContext()).thenReturn(ctx)
-            response = new HttpResponseMessage(ctx, request, 99)
+
+            when(request.getContext()).thenReturn(ctx)
+            when(request.getInboundRequest()).thenReturn(request)
 
             reqHeaders = new Headers()
-            Mockito.when(request.getHeaders()).thenReturn(reqHeaders)
+            when(request.getHeaders()).thenReturn(reqHeaders)
+
+            response = new HttpResponseMessageImpl(ctx, request, 99)
         }
 
         @Test

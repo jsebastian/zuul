@@ -15,8 +15,9 @@
  */
 package endpoint
 
-import com.netflix.zuul.context.HttpRequestMessage
-import com.netflix.zuul.context.HttpResponseMessage
+import com.netflix.zuul.message.http.HttpRequestMessage
+import com.netflix.zuul.message.http.HttpResponseMessage
+import com.netflix.zuul.message.http.HttpResponseMessageImpl
 import com.netflix.zuul.context.SessionContext
 import com.netflix.zuul.filters.http.HttpSyncEndpoint
 import org.junit.Before
@@ -40,7 +41,7 @@ class Options extends HttpSyncEndpoint
     @Override
     HttpResponseMessage apply(HttpRequestMessage request)
     {
-        HttpResponseMessage response = new HttpResponseMessage(request.getContext(), request, 200)
+        HttpResponseMessage response = new HttpResponseMessageImpl(request.getContext(), request, 200)
         // Empty response body.
         return response
     }

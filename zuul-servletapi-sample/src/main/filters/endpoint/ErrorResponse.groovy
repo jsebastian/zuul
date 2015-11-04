@@ -15,12 +15,13 @@
  */
 package endpoint
 
-import com.netflix.zuul.context.HttpQueryParams
-import com.netflix.zuul.context.HttpRequestMessage
-import com.netflix.zuul.context.HttpResponseMessage
-import com.netflix.zuul.context.SessionContext
+import com.netflix.zuul.context.*
 import com.netflix.zuul.exception.ZuulException
 import com.netflix.zuul.filters.http.HttpSyncEndpoint
+import com.netflix.zuul.message.http.HttpQueryParams
+import com.netflix.zuul.message.http.HttpRequestMessage
+import com.netflix.zuul.message.http.HttpResponseMessage
+import com.netflix.zuul.message.http.HttpResponseMessageImpl
 import com.netflix.zuul.stats.ErrorStatsManager
 import org.junit.Assert
 import org.junit.Before
@@ -37,7 +38,7 @@ class ErrorResponse extends HttpSyncEndpoint
     {
         SessionContext context = request.getContext()
 
-        HttpResponseMessage response = new HttpResponseMessage(context, request, 500)
+        HttpResponseMessage response = new HttpResponseMessageImpl(context, request, 500)
         Throwable e = context.getError()
 
         if (ZuulException.class.isAssignableFrom(e.getClass())) {

@@ -17,7 +17,7 @@ package com.netflix.zuul.filters;
 
 import com.netflix.config.DynamicBooleanProperty;
 import com.netflix.config.DynamicPropertyFactory;
-import com.netflix.zuul.context.ZuulMessage;
+import com.netflix.zuul.message.ZuulMessage;
 import org.junit.Before;
 import org.junit.Test;
 import org.mockito.Mock;
@@ -56,14 +56,14 @@ public abstract class BaseFilter<I extends ZuulMessage, O extends ZuulMessage> i
 
 
     /**
-     * Default to NORMAL priority.
+     * Default to a priority of 10.
      *
      * @return
      */
     @Override
-    public FilterPriority getPriority()
+    public int getPriority()
     {
-        return FilterPriority.NORMAL;
+        return 10;
     }
 
     /**

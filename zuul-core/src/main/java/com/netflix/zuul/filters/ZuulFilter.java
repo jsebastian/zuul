@@ -15,7 +15,7 @@
  */
 package com.netflix.zuul.filters;
 
-import com.netflix.zuul.context.ZuulMessage;
+import com.netflix.zuul.message.ZuulMessage;
 import rx.Observable;
 
 /**
@@ -27,9 +27,9 @@ import rx.Observable;
  */
 public interface ZuulFilter<I extends ZuulMessage, O extends ZuulMessage> extends ShouldFilter<I>
 {
-    public boolean isDisabled();
+    boolean isDisabled();
 
-    public String filterName();
+    String filterName();
 
     /**
      * filterOrder() must also be defined for a filter. Filters may have the same  filterOrder if precedence is not
@@ -56,7 +56,7 @@ public interface ZuulFilter<I extends ZuulMessage, O extends ZuulMessage> extend
      *
      * @return
      */
-    FilterPriority getPriority();
+    int getPriority();
 
     /**
      * if shouldFilter() is true, this method will be invoked. this method is the core method of a ZuulFilter
