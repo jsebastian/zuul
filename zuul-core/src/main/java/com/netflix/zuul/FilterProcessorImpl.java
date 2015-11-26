@@ -270,11 +270,6 @@ public class FilterProcessorImpl implements FilterProcessor
         return new HttpResponseMessageImpl(request.getContext(), request, 500);
     }
 
-    public Observable<ZuulMessage> processFilterAsObservable(Observable<ZuulMessage> input, ZuulFilter filter, boolean shouldSendErrorResponse)
-    {
-        return input.flatMap(msg -> processAsyncFilter(msg, filter, shouldSendErrorResponse));
-    }
-
     /**
      * Processes an individual ZuulFilter. This method adds Debug information. Any uncaught Throwables from filters
      * are caught by this method and stored for future insight on the SessionContext.getFilterErrors().
@@ -287,12 +282,8 @@ public class FilterProcessorImpl implements FilterProcessor
     public Observable<ZuulMessage> processAsyncFilter(ZuulMessage msg, ZuulFilter filter, boolean shouldSendErrorResponse)
     {
         final FilterExecInfo info = new FilterExecInfo();
-        info.bDebug = msg.getContext().debugRouting();
 
-        if (info.bDebug) {
-            Debug.addRoutingDebug(msg.getContext(), "Filter " + filter.filterType().toString() + " " + filter.filterOrder() + " " + filter.filterName());
-            info.debugCopy = msg.clone();
-        }
+        handleDebug(filter, msg, info);
 
         // Apply this filter.
         Observable<ZuulMessage> resultObs;
@@ -302,9 +293,7 @@ public class FilterProcessorImpl implements FilterProcessor
                 resultObs = Observable.just(filter.getDefaultOutput(msg));
                 info.status = ExecutionStatus.DISABLED;
             }
-            else if (msg.getContext().shouldStopFilterProcessing()
-                    && ! filter.overrideStopFilterProcessing()
-                    && ! isEndpointFilter(filter)) {
+            else if (shouldSkipFilter(filter, msg)) {
                 // Skip this filter.
                 // This is typically set by a filter when wanting to reject a request, and also reduce load on the server by
                 // not processing any more filters.
@@ -333,11 +322,7 @@ public class FilterProcessorImpl implements FilterProcessor
         // Handle errors from the filter. Don't break out of the filter chain - instead just record info about the error
         // in context, and continue.
         resultObs = resultObs.onErrorReturn((e) -> {
-            msg.getContext().setError(e);
-            if (shouldSendErrorResponse) msg.getContext().setShouldSendErrorResponse(true);
-            info.status = ExecutionStatus.FAILED;
-            recordFilterError(filter, msg, e);
-            return filter.getDefaultOutput(msg);
+            return handleFilterException(filter, msg, shouldSendErrorResponse, info, e);
         });
 
         // If no resultContext returned from filter, then use the original context.
@@ -354,11 +339,7 @@ public class FilterProcessorImpl implements FilterProcessor
 
         // Record info when filter processing completes.
         resultObs = resultObs.doOnNext((msg1) -> {
-            if (info.status == null) {
-                info.status = ExecutionStatus.SUCCESS;
-            }
-            info.execTime = System.currentTimeMillis() - ltime;
-            recordFilterCompletion(msg1, filter, info);
+            recordFilterCompletion(msg1, filter, info, ltime);
         });
 
         return resultObs;
@@ -375,12 +356,8 @@ public class FilterProcessorImpl implements FilterProcessor
     public ZuulMessage processSyncFilter(ZuulMessage msg, SyncZuulFilter filter, boolean shouldSendErrorResponse)
     {
         final FilterExecInfo info = new FilterExecInfo();
-        info.bDebug = msg.getContext().debugRouting();
 
-        if (info.bDebug) {
-            Debug.addRoutingDebug(msg.getContext(), "Filter " + filter.filterType().toString() + " " + filter.filterOrder() + " " + filter.filterName());
-            info.debugCopy = msg.clone();
-        }
+        handleDebug(filter, msg, info);
 
         // Apply this filter.
         ZuulMessage result;
@@ -390,9 +367,7 @@ public class FilterProcessorImpl implements FilterProcessor
                 result = filter.getDefaultOutput(msg);
                 info.status = DISABLED;
             }
-            else if (msg.getContext().shouldStopFilterProcessing()
-                    && ! filter.overrideStopFilterProcessing()
-                    && ! isEndpointFilter(filter)) {
+            else if (shouldSkipFilter(filter, msg)) {
                 // Skip this filter.
                 // This is typically set by a filter when wanting to reject a request, and also reduce load on the server by
                 // not processing any more filters.
@@ -417,21 +392,38 @@ public class FilterProcessorImpl implements FilterProcessor
             }
         }
         catch (Exception e) {
-            result = filter.getDefaultOutput(msg);
-            msg.getContext().setError(e);
-            if (shouldSendErrorResponse) msg.getContext().setShouldSendErrorResponse(true);
-            info.status = FAILED;
-            recordFilterError(filter, msg, e);
+            result = handleFilterException(filter, msg, shouldSendErrorResponse, info, e);
         }
 
         // Record info when filter processing completes.
-        if (info.status == null) {
-            info.status = SUCCESS;
-        }
-        info.execTime = System.currentTimeMillis() - ltime;
-        recordFilterCompletion(result, filter, info);
+        recordFilterCompletion(result, filter, info, ltime);
 
         return result;
+    }
+
+    protected void handleDebug(ZuulFilter filter, ZuulMessage msg, FilterExecInfo info)
+    {
+        info.bDebug = msg.getContext().debugRouting();
+        if (info.bDebug) {
+            Debug.addRoutingDebug(msg.getContext(), "Filter " + filter.filterType().toString() + " " + filter.filterOrder() + " " + filter.filterName());
+            info.debugCopy = msg.clone();
+        }
+    }
+
+    protected boolean shouldSkipFilter(ZuulFilter filter, ZuulMessage msg)
+    {
+        return msg.getContext().shouldStopFilterProcessing()
+                && ! filter.overrideStopFilterProcessing()
+                && ! isEndpointFilter(filter);
+    }
+
+    protected ZuulMessage handleFilterException(ZuulFilter filter, ZuulMessage msg, boolean shouldSendErrorResponse, FilterExecInfo info, Throwable e)
+    {
+        msg.getContext().setError(e);
+        if (shouldSendErrorResponse) msg.getContext().setShouldSendErrorResponse(true);
+        info.status = FAILED;
+        recordFilterError(filter, msg, e);
+        return filter.getDefaultOutput(msg);
     }
 
     protected ZuulMessage chooseFilterInput(ZuulFilter filter, ZuulMessage msg)
@@ -461,8 +453,13 @@ public class FilterProcessorImpl implements FilterProcessor
         }
     }
 
-    protected void recordFilterCompletion(ZuulMessage msg, ZuulFilter filter, FilterExecInfo info)
+    protected void recordFilterCompletion(ZuulMessage msg, ZuulFilter filter, FilterExecInfo info, long startTime)
     {
+        if (info.status == null) {
+            info.status = ExecutionStatus.SUCCESS;
+        }
+        info.execTime = System.currentTimeMillis() - startTime;
+
         // Record the execution summary in context.
         switch (info.status) {
             case FAILED:
