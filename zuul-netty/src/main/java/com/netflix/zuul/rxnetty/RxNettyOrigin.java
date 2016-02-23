@@ -17,22 +17,23 @@ package com.netflix.zuul.rxnetty;
 
 import com.netflix.zuul.context.SessionContext;
 import com.netflix.zuul.message.Header;
+import com.netflix.zuul.message.HeaderName;
 import com.netflix.zuul.message.Headers;
+import com.netflix.zuul.message.http.HttpHeaderNames;
 import com.netflix.zuul.message.http.HttpRequestMessage;
 import com.netflix.zuul.message.http.HttpResponseMessage;
 import com.netflix.zuul.message.http.HttpResponseMessageImpl;
 import com.netflix.zuul.origins.Origin;
+import com.netflix.zuul.util.ProxyUtils;
 import io.netty.buffer.ByteBuf;
 import io.netty.handler.codec.http.HttpMethod;
 import io.netty.handler.logging.LogLevel;
-import io.reactivex.netty.client.ConnectionProvider;
+import io.reactivex.netty.client.Host;
+import io.reactivex.netty.client.loadbalancer.LoadBalancerFactory;
+import io.reactivex.netty.client.loadbalancer.LoadBalancingStrategy;
 import io.reactivex.netty.protocol.http.client.HttpClient;
 import io.reactivex.netty.protocol.http.client.HttpClientRequest;
-import netflix.ocelli.Instance;
-import netflix.ocelli.rxnetty.protocol.http.HttpLoadBalancer;
 import rx.Observable;
-
-import java.net.SocketAddress;
 
 /**
  * User: michaels@netflix.com
@@ -45,14 +46,14 @@ public class RxNettyOrigin implements Origin {
     private final HttpClient<ByteBuf, ByteBuf> client;
     private final String name;
 
-    private RxNettyOrigin(String name, String vip, ConnectionProvider<ByteBuf, ByteBuf> loadBalancer,
-                         HttpClientMetrics clientMetrics) {
+    private RxNettyOrigin(String name, String vip, LoadBalancingStrategy<ByteBuf, ByteBuf> lb,
+                          Observable<Host> hostStream, HttpClientMetrics clientMetrics) {
         this.name = name;
         if (null == vip) {
             throw new IllegalArgumentException("VIP can not be null.");
         }
         this.vip = vip;
-        client = HttpClient.newClient(loadBalancer)
+        client = HttpClient.newClient(LoadBalancerFactory.create(lb), hostStream)
                            .enableWireLogging(LogLevel.DEBUG);
         client.subscribe(clientMetrics);
     }
@@ -83,12 +84,18 @@ public class RxNettyOrigin implements Origin {
     @Override
     public Observable<HttpResponseMessage> request(HttpRequestMessage requestMsg) {
         final SessionContext context = requestMsg.getContext();
+
+        // Add X-Forwarded headers if not already there.
+        ProxyUtils.addXForwardedHeaders(requestMsg);
+
         HttpMethod method = toNettyHttpMethod(requestMsg.getMethod());
         Headers headers = requestMsg.getHeaders();
         HttpClientRequest<ByteBuf, ByteBuf> request = client.createRequest(method, requestMsg.getPathAndQuery());
 
         for (Header header : headers.entries()) {
-            request = request.addHeader(header.getKey(), header.getValue());
+            if (ProxyUtils.isValidRequestHeader(header.getName())) {
+                request = request.addHeader(header.getKey(), header.getValue());
+            }
         }
 
         return request.writeContent(requestMsg.getBodyStream())
@@ -100,28 +107,26 @@ public class RxNettyOrigin implements Origin {
                                    .stream()
                                    .forEach(headerName -> nettyResp.getAllHeaderValues(headerName)
                                                                    .stream()
-                                                                   .forEach(headerVal ->
-                                                                                    respHeaders.add(headerName,
-                                                                                                    headerVal)));
+                                                                   .forEach(headerVal -> {
+                                                                       HeaderName hn = HttpHeaderNames.get(headerName);
+                                                                       if (ProxyUtils.isValidResponseHeader(hn)) {
+                                                                           respHeaders.add(headerName, headerVal);
+                                                                       }
+                                                                   }));
                           resp.setBodyStream(nettyResp.getContent());
                           return resp;
                       });
     }
 
-    public static RxNettyOrigin newOrigin(String name, String vip, Observable<Instance<SocketAddress>> hostStream) {
+    public static RxNettyOrigin newOrigin(String name, String vip, Observable<Host> hostStream) {
         HttpClientMetrics clientMetrics = new HttpClientMetrics(name);
-        ConnectionProvider<ByteBuf, ByteBuf> cp =
-                HttpLoadBalancer.<ByteBuf, ByteBuf>choiceOfTwo(hostStream,
-                                                               failureListener -> new HttpClientListenerImpl(failureListener,
-                                                                                                       clientMetrics))
-                                .toConnectionProvider();
-        return new RxNettyOrigin(name, vip, cp, clientMetrics);
+        LoadBalancingStrategy<ByteBuf, ByteBuf> lb = new PowerOfTwoChoices(clientMetrics);
+        return new RxNettyOrigin(name, vip, lb, hostStream, clientMetrics);
     }
 
-    public static RxNettyOrigin newOrigin(String name, String vip,
-                                          ConnectionProvider<ByteBuf, ByteBuf> connectionProvider,
-                                          HttpClientMetrics clientMetrics) {
-        return new RxNettyOrigin(name, vip, connectionProvider, clientMetrics);
+    public static RxNettyOrigin newOrigin(String name, String vip, LoadBalancingStrategy<ByteBuf, ByteBuf> lb,
+                                          Observable<Host> hostStream, HttpClientMetrics clientMetrics) {
+        return new RxNettyOrigin(name, vip, lb, hostStream, clientMetrics);
     }
 
     public static RxNettyOrigin newOrigin(String name, String vip, HttpClient<ByteBuf, ByteBuf> client) {

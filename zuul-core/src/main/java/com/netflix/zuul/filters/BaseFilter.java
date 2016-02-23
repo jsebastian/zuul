@@ -15,9 +15,8 @@
  */
 package com.netflix.zuul.filters;
 
-import com.netflix.config.DynamicBooleanProperty;
-import com.netflix.config.DynamicPropertyFactory;
 import com.netflix.zuul.message.ZuulMessage;
+import com.netflix.zuul.properties.CachedProperties;
 import org.junit.Before;
 import org.junit.Test;
 import org.mockito.Mock;
@@ -36,7 +35,7 @@ import static org.mockito.Mockito.when;
  * filterOrder() must also be defined for a filter. Filters may have the same  filterOrder if precedence is not
  * important for a filter. filterOrders do not need to be sequential.
  * <p/>
- * ZuulFilters may be disabled using Archius Properties.
+ * ZuulFilters may be disabled using Archaius Properties.
  * <p/>
  * By default ZuulFilters are static; they don't carry state. This may be overridden by overriding the isStaticFilter() property to false
  *
@@ -46,24 +45,17 @@ import static org.mockito.Mockito.when;
  */
 public abstract class BaseFilter<I extends ZuulMessage, O extends ZuulMessage> implements ZuulFilter<I,O>
 {
-    private final DynamicBooleanProperty filterDisabled =
-            DynamicPropertyFactory.getInstance().getBooleanProperty(disablePropertyName(), false);
+    private final CachedProperties.Boolean filterDisabled = new CachedProperties.Boolean(disablePropertyName(), false);
 
     @Override
     public String filterName() {
         return this.getClass().getName();
     }
 
-
-    /**
-     * Default to a priority of 10.
-     *
-     * @return
-     */
     @Override
-    public int getPriority()
+    public boolean overrideStopFilterProcessing()
     {
-        return 10;
+        return false;
     }
 
     /**
@@ -72,7 +64,7 @@ public abstract class BaseFilter<I extends ZuulMessage, O extends ZuulMessage> i
      * @return
      */
     public String disablePropertyName() {
-        return "zuul." + this.getClass().getSimpleName() + "." + filterType() + ".disable";
+        return "zuul." + this.getClass().getSimpleName() + "." + filterType().toString() + ".disable";
     }
 
     /**
@@ -83,6 +75,18 @@ public abstract class BaseFilter<I extends ZuulMessage, O extends ZuulMessage> i
     @Override
     public boolean isDisabled() {
         return filterDisabled.get();
+    }
+
+    @Override
+    public ZuulMessage getDefaultOutput(I input)
+    {
+        return input;
+    }
+
+    @Override
+    public FilterSyncType getSyncType()
+    {
+        return FilterSyncType.ASYNC;
     }
 
     @Override
@@ -115,8 +119,8 @@ public abstract class BaseFilter<I extends ZuulMessage, O extends ZuulMessage> i
                 }
 
                 @Override
-                public String filterType() {
-                    return "pre";
+                public FilterType filterType() {
+                    return FilterType.INBOUND;
                 }
 
                 @Override

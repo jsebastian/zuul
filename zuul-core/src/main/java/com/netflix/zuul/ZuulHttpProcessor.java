@@ -10,6 +10,7 @@ import com.netflix.zuul.message.http.HttpResponseMessageImpl;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import rx.Observable;
+import rx.functions.Func0;
 
 import javax.annotation.Nullable;
 import javax.inject.Inject;
@@ -65,58 +66,56 @@ public class ZuulHttpProcessor<I,O>
             context = decorator.decorate(new SessionContext());
         }
 
-        // Build a ZuulMessage from the netty request.
-        final ZuulMessage request = contextFactory.create(context, nativeRequest, nativeResponse);
+        return Observable.defer((Func0<Observable<ZuulMessage>>) () -> {
 
-        // Start timing the request.
-        request.getContext().getTimings().getRequest().start();
+            // Build a ZuulMessage from the netty request.
+            final ZuulMessage request = contextFactory.create(context, nativeRequest, nativeResponse);
 
-        // Create initial chain.
-        Observable<ZuulMessage> chain = Observable.just(request);
+            // Start timing the request.
+            request.getContext().getTimings().getRequest().start();
 
-        /*
-         * Delegate all of the filter application logic to {@link FilterProcessor}.
-         * This work is some combination of synchronous and asynchronous.
-         */
-        chain = filterProcessor.applyInboundFilters(chain);
-        chain = filterProcessor.applyEndpointFilter(chain);
-        chain = filterProcessor.applyOutboundFilters(chain);
+            /*
+             * Delegate all of the filter application logic to {@link FilterProcessor}.
+             * This work is some combination of synchronous and asynchronous.
+             */
+            Observable<ZuulMessage> chain = filterProcessor.applyFilterChain(request);
 
-        return chain
-                .flatMap(msg -> {
-                    // Wrap this in a try/catch because we need to ensure no exception stops the observable, as
-                    // we need the following doOnNext to always run - as it records metrics.
-                    try {
-                        // Write out the response.
-                        return contextFactory.write(msg, nativeResponse);
-                    }
-                    catch (Exception e) {
-                        LOG.error("Error in writing response! request=" + request.getInfoForLogging(), e);
+            return chain
+                    .flatMap(msg -> {
+                        // Wrap this in a try/catch because we need to ensure no exception stops the observable, as
+                        // we need the following doOnNext to always run - as it records metrics.
+                        try {
+                            // Write out the response.
+                            return contextFactory.write(msg, nativeResponse);
+                        }
+                        catch (Exception e) {
+                            LOG.error("Error in writing response! request=" + request.getInfoForLogging(), e);
 
-                        // Generate a default error response to be sent to client.
-                        return Observable.just(new HttpResponseMessageImpl(context, ((HttpResponseMessage) msg).getOutboundRequest(), 500));
-                    }
-                    finally {
-                        // End the timing.
-                        msg.getContext().getTimings().getRequest().end();
-                    }
-                })
-                .doOnError(e -> {
-                    LOG.error("Unexpected error in filter chain! request=" + request.getInfoForLogging(), e);
-                })
-                .doOnNext(msg -> {
-                    // Notify requestComplete listener if configured.
-                    try {
-                        if (requestCompleteHandler != null)
-                            requestCompleteHandler.handle((HttpResponseMessage) msg);
-                    }
-                    catch (Exception e) {
-                        LOG.error("Error in RequestCompleteHandler.", e);
-                    }
-                })
-                .finallyDo(() -> {
-                    // Cleanup any resources related to this request/response.
-                    sessionCleaner.cleanup(context);
-                });
+                            // Generate a default error response to be sent to client.
+                            return Observable.just(new HttpResponseMessageImpl(context, ((HttpResponseMessage) msg).getOutboundRequest(), 500));
+                        }
+                        finally {
+                            // End the timing.
+                            msg.getContext().getTimings().getRequest().end();
+                        }
+                    })
+                    .doOnError(e -> {
+                        LOG.error("Unexpected error in filter chain! request=" + request.getInfoForLogging(), e);
+                    })
+                    .doOnNext(msg -> {
+                        // Notify requestComplete listener if configured.
+                        try {
+                            if (requestCompleteHandler != null)
+                                requestCompleteHandler.handle((HttpResponseMessage) msg);
+                        }
+                        catch (Exception e) {
+                            LOG.error("Error in RequestCompleteHandler.", e);
+                        }
+                    })
+                    ;
+        }).finallyDo(() -> {
+            // Cleanup any resources related to this request/response.
+            sessionCleaner.cleanup(context);
+        });
     }
 }

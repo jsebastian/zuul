@@ -47,17 +47,22 @@ public class SessionContext extends HashMap<String, Object> implements Cloneable
     private static final int INITIAL_SIZE =
             DynamicPropertyFactory.getInstance().getIntProperty("com.netflix.zuul.context.SessionContext.initialSize", 60).get();
 
-    /** Default to apply filters of all priority levels. */
-    private int filterPriority = 0;
-
+    private boolean brownoutMode = false;
     private boolean shouldStopFilterProcessing = false;
+    private boolean shouldSendErrorResponse = false;
+    private boolean errorResponseSent = false;
+    private boolean debugRouting = false;
+    private boolean debugRequest = false;
+    private boolean debugRequestHeadersOnly = false;
+
+    private Timings timings = new Timings();
+
 
     private static final String KEY_UUID = "_uuid";
     private static final String KEY_VIP = "routeVIP";
     private static final String KEY_ENDPOINT = "_endpoint";
     private static final String KEY_STATIC_RESPONSE = "_static_response";
 
-    private static final String KEY_TIMINGS = "_timings";
     private static final String KEY_EVENT_PROPS = "eventProperties";
     private static final String KEY_FILTER_ERRORS = "_filter_errors";
     private static final String KEY_FILTER_EXECS = "_filter_executions";
@@ -68,7 +73,6 @@ public class SessionContext extends HashMap<String, Object> implements Cloneable
         // 16 entries.
         super(INITIAL_SIZE);
 
-        put(KEY_TIMINGS, new Timings());
         put(KEY_FILTER_EXECS, new StringBuilder());
         put(KEY_EVENT_PROPS, new HashMap<String, Object>());
         put(KEY_FILTER_ERRORS, new ArrayList<FilterError>());
@@ -84,7 +88,6 @@ public class SessionContext extends HashMap<String, Object> implements Cloneable
     {
         return (SessionContext) super.clone();
     }
-
 
     public String getString(String key)
     {
@@ -144,8 +147,14 @@ public class SessionContext extends HashMap<String, Object> implements Cloneable
     public SessionContext copy()
     {
         SessionContext copy = new SessionContext();
-        copy.filterPriority = filterPriority;
+        copy.brownoutMode = brownoutMode;
         copy.shouldStopFilterProcessing = shouldStopFilterProcessing;
+        copy.shouldSendErrorResponse = shouldSendErrorResponse;
+        copy.errorResponseSent = errorResponseSent;
+        copy.debugRouting = debugRouting;
+        copy.debugRequest = debugRequest;
+        copy.debugRequestHeadersOnly = debugRequestHeadersOnly;
+        copy.timings = timings;
 
         Iterator<String> it = keySet().iterator();
         String key = it.next();
@@ -219,14 +228,14 @@ public class SessionContext extends HashMap<String, Object> implements Cloneable
      * @param bDebug
      */
     public void setDebugRouting(boolean bDebug) {
-        set("debugRouting", bDebug);
+        this.debugRouting = bDebug;
     }
 
     /**
      * @return "debugRouting"
      */
     public boolean debugRouting() {
-        return getBoolean("debugRouting");
+        return debugRouting;
     }
 
     /**
@@ -235,7 +244,7 @@ public class SessionContext extends HashMap<String, Object> implements Cloneable
      * @param bHeadersOnly
      */
     public void setDebugRequestHeadersOnly(boolean bHeadersOnly) {
-        set("debugRequestHeadersOnly", bHeadersOnly);
+        this.debugRequestHeadersOnly = bHeadersOnly;
 
     }
 
@@ -243,7 +252,7 @@ public class SessionContext extends HashMap<String, Object> implements Cloneable
      * @return "debugRequestHeadersOnly"
      */
     public boolean debugRequestHeadersOnly() {
-        return getBoolean("debugRequestHeadersOnly");
+        return this.debugRequestHeadersOnly;
     }
 
     /**
@@ -252,7 +261,7 @@ public class SessionContext extends HashMap<String, Object> implements Cloneable
      * @param bDebug
      */
     public void setDebugRequest(boolean bDebug) {
-        set("debugRequest", bDebug);
+        this.debugRequest = bDebug;
     }
 
     /**
@@ -261,7 +270,7 @@ public class SessionContext extends HashMap<String, Object> implements Cloneable
      * @return debugRequest
      */
     public boolean debugRequest() {
-        return getBoolean("debugRequest");
+        return this.debugRequest;
     }
 
     /**
@@ -307,7 +316,7 @@ public class SessionContext extends HashMap<String, Object> implements Cloneable
 
 
     public boolean shouldSendErrorResponse() {
-        return getBoolean("shouldSendErrorResponse", false);
+        return this.shouldSendErrorResponse;
     }
 
     /**
@@ -317,17 +326,32 @@ public class SessionContext extends HashMap<String, Object> implements Cloneable
      * @param should
      */
     public void setShouldSendErrorResponse(boolean should) {
-        set("shouldSendErrorResponse", Boolean.valueOf(should));
+        this.shouldSendErrorResponse = should;
     }
 
 
     public boolean errorResponseSent() {
-        return getBoolean("errorResponseSent", false);
+        return this.errorResponseSent;
     }
     public void setErrorResponseSent(boolean should) {
-        set("errorResponseSent", Boolean.valueOf(should));
+        this.errorResponseSent = should;
     }
 
+
+    /**
+     * This can be used by filters for flagging if the server is getting overloaded, and then choose
+     * to disable/sample/rate-limit some optional features.
+     *
+     * @return
+     */
+    public boolean isInBrownoutMode()
+    {
+        return brownoutMode;
+    }
+    public void setInBrownoutMode()
+    {
+        this.brownoutMode = true;
+    }
 
     /**
      * This is typically set by a filter when wanting to reject a request, and also reduce load on the server
@@ -368,23 +392,6 @@ public class SessionContext extends HashMap<String, Object> implements Cloneable
         return (String) get(KEY_ENDPOINT);
     }
 
-    /**
-     * The level of priority to use for applying filters. Only filters of specified priority
-     * and above will be applied.
-     *
-     * ie. if non-zero, then only filters of specified priority and above will be applied.
-     *     if zero, then all filters will be applied.
-     *
-     * @return
-     */
-    public int getFilterPriorityToApply() {
-        return filterPriority;
-    }
-    public void setFilterPriorityToApply(int priority)
-    {
-        this.filterPriority = priority;
-    }
-
     public void setEventProperty(String key, Object value) {
         getEventProperties().put(key, value);
     }
@@ -399,7 +406,7 @@ public class SessionContext extends HashMap<String, Object> implements Cloneable
 
     public Timings getTimings()
     {
-        return (Timings) get(KEY_TIMINGS);
+        return timings;
     }
 
     public void setOriginReportedDuration(int duration)
